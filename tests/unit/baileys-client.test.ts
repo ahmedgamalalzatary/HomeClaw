@@ -94,7 +94,7 @@ describe("BaileysClient", () => {
   }
 
   it("keeps reconnecting when reconnect attempt fails", async () => {
-    const timeoutSpy = vi.spyOn(global, "setTimeout")
+    const timeoutSpy = vi.spyOn(globalThis, "setTimeout")
     useMultiFileAuthStateMock
       .mockResolvedValueOnce({ state: {}, saveCreds: vi.fn() })
       .mockImplementationOnce(() => {

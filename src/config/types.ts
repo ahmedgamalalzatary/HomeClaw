@@ -70,7 +70,7 @@ export interface HotReloadConfig {
 export const GatewayConfigSchema: z.ZodType<GatewayConfig> = z.object({
   provider: z.object({
     name: z.string().min(1),
-    apiKey: z.string(),
+    apiKey: z.string().min(1),
     primaryModel: z.string().min(1),
     fallbackModels: z.array(z.string()),
     params: z.object({

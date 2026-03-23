@@ -178,6 +178,7 @@ export class Gateway {
       const nextSessionPath = await this.createSessionPath(chatId);
       await this.logger.setSession(this.sessionIdFromPath(nextSessionPath));
       await this.whatsapp.sendText(chatId, handleNewSessionMessage());
+      return;
     }
 
     // Unknown commands are intentionally ignored for MVP.
