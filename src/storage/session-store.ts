@@ -1,5 +1,4 @@
 import { appendFile, mkdir, readFile, rename, stat } from "node:fs/promises"
-import { randomUUID } from "node:crypto"
 import path from "node:path"
 import type { ChatMessage } from "../types/chat.js"
 import { isMissingFileError } from "../tools/errors.js"
@@ -11,6 +10,7 @@ export class SessionStore {
   ) { }
 
   buildSessionPath(chatId: string, date = new Date()): string {
+    const safeChatId = this.sanitizeChatId(chatId)
     const y = date.getUTCFullYear()
     const m = String(date.getUTCMonth() + 1).padStart(2, "0")
     const d = String(date.getUTCDate()).padStart(2, "0")
@@ -19,6 +19,7 @@ export class SessionStore {
     const s = String(date.getUTCSeconds()).padStart(2, "0")
     return path.join(
       this.sessionsDir,
+      safeChatId,
       `${y}-${m}-${d}`,
       `${h}-${min}-${s}.md`
     )

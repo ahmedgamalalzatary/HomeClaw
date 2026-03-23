@@ -21,7 +21,7 @@ describe("SessionStore", () => {
     const date = new Date("2026-01-02T03:04:05.000Z")
     const sessionPath = store.buildSessionPath("user@s.whatsapp.net", date)
     expect(sessionPath.startsWith(path.join("sessions"))).toBe(true)
-    expect(sessionPath).toContain(path.join("2026-01-02", "03-04-05.md"))
+    expect(sessionPath).toContain(path.join("user_s.whatsapp.net", "2026-01-02", "03-04-05.md"))
     expect(sessionPath.endsWith(".md")).toBe(true)
   })
 
@@ -31,6 +31,18 @@ describe("SessionStore", () => {
     const a = store.buildSessionPath("user@s.whatsapp.net", date)
     const b = store.buildSessionPath("user@s.whatsapp.net", date)
     expect(a).toBe(b)
+  })
+
+  it("buildSessionPath separates chats even at the same timestamp", () => {
+    const store = new SessionStore("sessions", "memory")
+    const date = new Date("2026-01-02T03:04:05.000Z")
+
+    const first = store.buildSessionPath("first@s.whatsapp.net", date)
+    const second = store.buildSessionPath("second@s.whatsapp.net", date)
+
+    expect(first).not.toBe(second)
+    expect(first).toContain("first_s.whatsapp.net")
+    expect(second).toContain("second_s.whatsapp.net")
   })
 
   it("appends markdown message blocks", async () => {

@@ -1,0 +1,102 @@
+# Home Claw Gateway Roadmap
+
+This file tracks discussed and upcoming changes that are not fully built yet.
+It is intentionally future-facing.
+
+Current implementation status lives in:
+
+- `docs/Checklist.md`
+- `docs/Features.md`
+- `docs/phases.md`
+- `docs/summarization.md`
+
+## Near-Term Priorities
+
+### Retry and Failure Handling
+
+- Change the retry order to:
+- same-model retry first
+- then fallback model 1
+- then fallback model 2
+- Make retry attempts and delay sequence configurable from `config.json`.
+- Keep the prompt/context identical across retry attempts.
+- Improve final user-facing AI failure messages with richer model/error detail.
+
+### Heartbeat Execution
+
+- Turn heartbeat from a timer-only log event into a real AI run.
+- Build heartbeat context from:
+- `AGENTS.md`
+- `SOUL.md`
+- `TOOLS.md`
+- `USER.md`
+- `HEARTBEAT.md`
+- Run heartbeat as a separate no-history chat.
+- Suppress exact normalized `heartbeat ok`.
+- Send any other non-empty heartbeat output to WhatsApp.
+- Persist heartbeat output to `sessions/heartbeat/YYYY-MM-DD/HH-mm.md`.
+
+### Persistence and Restore
+
+- Strengthen the source-of-truth contract:
+- markdown session files for live conversation context
+- SQLite for search/history/index lookups
+- Add explicit search/history query paths on top of SQLite.
+- Improve startup restore so the gateway can recover more complete conversation state after restart.
+
+## Mid-Term Features
+
+### Long Context and Compaction
+
+- Add token counting for the full chat context.
+- Trigger compaction around `64k` tokens.
+- Compress older history while keeping the latest raw user and assistant turns.
+- Persist the compaction summary to both SQLite and markdown history.
+
+### Vector Memory
+
+- Move beyond the current scaffold into a real `sqlite-vec` retrieval layer.
+- Index chat messages for semantic recall.
+- Keep retrieval disabled by default.
+- Only activate retrieval on explicit bot/model trigger.
+- Optionally maintain a lightweight manual memory index file with short summaries per memory file.
+
+### Workspace Tooling Boundary
+
+- Enforce workspace-only file access at runtime.
+- Add hard rejection for writes or file operations outside `/workspace`.
+- Introduce gateway-managed tool execution surfaces such as `exec` and `spawn`.
+- Enforce autonomous-task todo tracking via `workspace/todo/todo.md`.
+- Add locked-section rules such as `CORE:LOCK` / `AI:OPEN` if that protection model is still desired.
+
+## Later-Stage Platform Work
+
+### Checkpointing
+
+- Add a gateway-managed scheduler that snapshots `workspace/` every `10min`.
+- Keep checkpoint artifacts immutable and gateway-owned.
+
+### Web Access
+
+- Add advanced web access support through Python `scrapling`.
+- Add a web-fetch MCP server.
+- Keep web-fetch context loaded only when the model explicitly requests it.
+
+### Runtime and Infra
+
+- Add a file-based health signal for Docker health checks.
+- Broaden runtime reconfiguration so hot reload can rebuild more than the in-memory gateway config.
+- Improve operational logging coverage and secret redaction.
+
+## Post-MVP Extensions
+
+- OAuth authentication.
+- Allowlist controls editable in config.
+- Additional AI providers and model families.
+- Group chat support.
+- Media input support.
+
+## Notes
+
+- This roadmap is a planning document, not a promise of implementation order.
+- If a future feature gets built, move its factual current-state description into the other docs and keep this file focused on remaining work.
