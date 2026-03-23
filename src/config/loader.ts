@@ -1,7 +1,22 @@
 import { readFile } from "node:fs/promises";
 import { watch } from "node:fs";
 import path from "node:path";
-import type { GatewayConfig } from "./types.js";
+import { type GatewayConfig, GatewayConfigSchema } from "./types.js";
+
+function formatConfigError(error: unknown): string {
+  if (typeof error !== "object" || error === null || !("issues" in error)) {
+    return error instanceof Error ? error.message : String(error)
+  }
+
+  const issues = (error as { issues?: Array<{ path?: Array<string | number>; message: string }> }).issues ?? []
+  if (issues.length === 0) {
+    return "invalid configuration"
+  }
+
+  return issues
+    .map((issue) => `${issue.path?.join(".") || "<root>"}: ${issue.message}`)
+    .join("; ")
+}
 
 export class ConfigLoader {
   private readonly configPath: string;
@@ -13,9 +28,13 @@ export class ConfigLoader {
 
   async load(): Promise<GatewayConfig> {
     const raw = await readFile(this.configPath, "utf8");
-    const parsed = JSON.parse(raw) as GatewayConfig;
-    this.current = parsed;
-    return parsed;
+    const parsed = JSON.parse(raw) as unknown;
+    const validated = GatewayConfigSchema.safeParse(parsed)
+    if (!validated.success) {
+      throw new Error(`Invalid config: ${formatConfigError(validated.error)}`)
+    }
+    this.current = validated.data;
+    return validated.data;
   }
 
   getCurrent(): GatewayConfig {
@@ -34,10 +53,10 @@ export class ConfigLoader {
       try {
         const nextConfig = await this.load();
         await onReload(nextConfig);
-      } catch {
-        // Keep old config if reload fails.
+      } catch (error) {
+        const reason = error instanceof Error ? error.stack ?? error.message : String(error)
+        process.stderr.write(`Config reload failed: ${reason}\n`)
       }
     });
   }
 }
-

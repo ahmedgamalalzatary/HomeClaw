@@ -9,14 +9,20 @@ export class SessionStore {
     private readonly memoryDir: string
   ) { }
 
-  buildSessionPath(date = new Date()): string {
+  buildSessionPath(chatId: string, date = new Date()): string {
+    const safeChatId = this.sanitizeChatId(chatId)
     const y = date.getUTCFullYear()
     const m = String(date.getUTCMonth() + 1).padStart(2, "0")
     const d = String(date.getUTCDate()).padStart(2, "0")
     const h = String(date.getUTCHours()).padStart(2, "0")
     const min = String(date.getUTCMinutes()).padStart(2, "0")
     const s = String(date.getUTCSeconds()).padStart(2, "0")
-    return path.join(this.sessionsDir, `${y}-${m}-${d}`, `${h}-${min}-${s}.md`)
+    return path.join(
+      this.sessionsDir,
+      safeChatId,
+      `${y}-${m}-${d}`,
+      `${h}-${min}-${s}.md`
+    )
   }
 
   async appendMessage(sessionPath: string, message: ChatMessage): Promise<void> {
@@ -107,6 +113,10 @@ export class SessionStore {
       .map((line) => (line.startsWith("  ") ? line.slice(2) : line))
       .join("\n")
       .trim()
+  }
+
+  private sanitizeChatId(chatId: string): string {
+    return chatId.replaceAll(/[^a-zA-Z0-9._-]/g, "_")
   }
 }
 

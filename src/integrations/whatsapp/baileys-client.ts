@@ -1,10 +1,12 @@
-
 import makeWASocket, { useMultiFileAuthState } from "@whiskeysockets/baileys";
+import type { proto } from "@whiskeysockets/baileys";
 import pino from "pino";
 import qrcode from "qrcode-terminal";
 import type { MessageHandler, WhatsAppClient } from "./client.js";
 import type { Logger } from "../../core/logger.js";
 import { extractTextFromBaileysMessage } from "./baileys-parser.js";
+
+type WebMessageInfo = proto.IWebMessageInfo
 
 export class BaileysClient implements WhatsAppClient {
   private currentStatus = "disconnected";
@@ -13,6 +15,12 @@ export class BaileysClient implements WhatsAppClient {
   private readonly composingRefreshMs = 9000;
   private readonly seenMessageIds = new Set<string>();
   private readonly maxSeenMessageIds = 5000;
+  private reconnectTimer: NodeJS.Timeout | null = null
+  private reconnectInFlight = false
+  private reconnectAttempt = 0
+  private readonly reconnectBaseDelayMs = 2000
+  private readonly reconnectMaxDelayMs = 30000
+  private readonly reconnectJitterMs = 500
 
   constructor(
     private readonly authPath: string,
@@ -54,6 +62,7 @@ export class BaileysClient implements WhatsAppClient {
 
       if (connection === "open") {
         this.currentStatus = "connected";
+        this.resetReconnectState()
         await this.logger?.info("WhatsApp connection opened.");
       }
 
@@ -64,15 +73,11 @@ export class BaileysClient implements WhatsAppClient {
         this.socket?.ev.removeAllListeners("connection.update");
         this.socket?.ev.removeAllListeners("messages.upsert");
         this.socket = null;
-        setTimeout(() => {
-          this.connect().catch(async (err) => {
-            await this.logger?.error?.(`Reconnection failed: ${err}`);
-          });
-        }, 2000);
+        this.scheduleReconnect()
       }
     });
 
-    sock.ev.on("messages.upsert", async (event: any) => {
+    sock.ev.on("messages.upsert", async (event) => {
       await this.logger?.info(
         `messages.upsert type=${String(event?.type)} count=${event?.messages?.length ?? 0}`
       );
@@ -87,13 +92,13 @@ export class BaileysClient implements WhatsAppClient {
     });
   }
 
-  private async handleIncomingMessage(message: any): Promise<void> {
+  private async handleIncomingMessage(message: WebMessageInfo): Promise<void> {
     const onMessage = this.onMessage
     if (!onMessage) {
       return;
     }
 
-    const remoteJid = message?.key?.remoteJid as string | undefined;
+    const remoteJid = message?.key?.remoteJid;
     const fromMe = Boolean(message?.key?.fromMe);
     if (!remoteJid || fromMe) {
       await this.logger?.info(
@@ -154,7 +159,7 @@ export class BaileysClient implements WhatsAppClient {
     return false
   }
 
-  private async safeMarkAsRead(message: any): Promise<void> {
+  private async safeMarkAsRead(message: WebMessageInfo): Promise<void> {
     const key = message?.key
     const sock = this.socket
     if (!sock || !key) {
@@ -206,5 +211,55 @@ export class BaileysClient implements WhatsAppClient {
         `Failed to send presence=${presence} for chatId=${chatId}: ${messageText}`
       )
     }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer || this.reconnectInFlight) {
+      return
+    }
+
+    const nextAttempt = this.reconnectAttempt + 1
+    const delayMs = this.computeReconnectDelayMs(nextAttempt)
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      void this.runReconnectAttempt()
+    }, delayMs)
+
+    void this.logger?.warn(
+      `WhatsApp reconnect scheduled attempt=${nextAttempt} delayMs=${delayMs}`
+    )
+  }
+
+  private async runReconnectAttempt(): Promise<void> {
+    if (this.reconnectInFlight) {
+      return
+    }
+    this.reconnectInFlight = true
+    this.reconnectAttempt += 1
+    try {
+      await this.connect()
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error)
+      await this.logger?.error(`Reconnection failed: ${messageText}`)
+      this.scheduleReconnect()
+    } finally {
+      this.reconnectInFlight = false
+    }
+  }
+
+  private computeReconnectDelayMs(attempt: number): number {
+    const exponential = this.reconnectBaseDelayMs * 2 ** Math.max(0, attempt - 1)
+    const baseDelay = Math.min(this.reconnectMaxDelayMs, exponential)
+    const jitter = Math.floor(Math.random() * this.reconnectJitterMs)
+    return baseDelay + jitter
+  }
+
+  private resetReconnectState(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.reconnectInFlight = false
+    this.reconnectAttempt = 0
   }
 }

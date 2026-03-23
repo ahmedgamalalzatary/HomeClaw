@@ -1,14 +1,18 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ChatMessage } from "../types/chat.js";
+import { isMissingFileError } from "../tools/errors.js";
 
 const CORE_FILES = ["AGENTS.md", "SOUL.md", "TOOLS.md", "USER.md"] as const;
 
 async function safeRead(filePath: string): Promise<string> {
   try {
     return await readFile(filePath, "utf8");
-  } catch {
-    return "";
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return "";
+    }
+    throw error
   }
 }
 
@@ -46,4 +50,3 @@ export async function buildHeartbeatContext(
 
   return base;
 }
-

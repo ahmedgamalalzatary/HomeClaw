@@ -1,7 +1,7 @@
 {
-  "name": "claw-gateway",
-  "version": "0.1.0",
-  "private": true,
+  "name": "homeclaw",
+  "version": "1.0.0",
+  "private": false,
   "description": "Personal WhatsApp AI gateway",
   "type": "module",
   "main": "dist/index.js",

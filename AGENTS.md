@@ -33,13 +33,10 @@ Node ≥ 22 required. First run prints a QR code — scan with WhatsApp to creat
 ```
 homeclaw/
 ├── docs/
-│   ├── architecture.md
 │   ├── Checklist.md
 │   ├── Features.md
-│   ├── memory.md
 │   ├── phases.md
-│   ├── summarization.md
-│   └── testing-plan.md
+│   └── summarization.md
 ├── scripts/
 │   ├── count-lines.ps1
 │   └── count-lines.sh

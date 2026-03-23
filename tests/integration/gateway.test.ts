@@ -277,6 +277,23 @@ describe("Gateway integration", () => {
     expect(whatsapp.sent).toHaveLength(2)
   })
 
+  it("ignores disabled slash commands based on config.commands.enabled", async () => {
+    const events: string[] = []
+    const ai = new FakeAI([{ text: "unused", model: "model-a" }], events)
+    const whatsapp = new FakeWhatsApp()
+    const sessions = new TrackingSessionStore(sessionsDir, memoryDir, events)
+    const sqlite = new TrackingSqliteStore(dbPath, events)
+    const config = buildConfig()
+    config.commands.enabled = ["/status", "/new"]
+    const gateway = createGateway(config, ai, whatsapp, sessions, sqlite)
+
+    await gateway.start()
+    await whatsapp.emit("/ping")
+
+    expect(ai.calls).toHaveLength(0)
+    expect(whatsapp.sent).toHaveLength(0)
+  })
+
   it("moves current session to memory when /new is called", async () => {
     const events: string[] = []
     const ai = new FakeAI([{ text: "hello", model: "model-a" }], events)
@@ -379,6 +396,27 @@ describe("Gateway integration", () => {
     expect(content).toContain("persist me")
     expect(content).toContain("## assistant")
     expect(content).toContain("ack")
+  })
+
+  it("creates separate session paths per chat id", async () => {
+    const events: string[] = []
+    const ai = new FakeAI(
+      [{ text: "first-reply", model: "model-a" }, { text: "second-reply", model: "model-a" }],
+      events
+    )
+    const whatsapp = new FakeWhatsApp()
+    const sessions = new TrackingSessionStore(sessionsDir, memoryDir, events)
+    const sqlite = new TrackingSqliteStore(dbPath, events)
+    const gateway = createGateway(buildConfig(), ai, whatsapp, sessions, sqlite)
+
+    await gateway.start()
+    await whatsapp.emit("hello from first", "first@s.whatsapp.net")
+    await whatsapp.emit("hello from second", "second@s.whatsapp.net")
+
+    const sessionFiles = await findMarkdownFiles(sessionsDir)
+    expect(sessionFiles).toHaveLength(2)
+    expect(sessionFiles.some((f) => f.includes("first_s.whatsapp.net"))).toBe(true)
+    expect(sessionFiles.some((f) => f.includes("second_s.whatsapp.net"))).toBe(true)
   })
 
   it("prepends workspace system context to AI input", async () => {

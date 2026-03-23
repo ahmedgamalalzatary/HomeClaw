@@ -58,4 +58,15 @@ describe("context builders", () => {
     expect(messages.at(-1)?.content).toContain("File: HEARTBEAT.md")
     expect(messages.at(-1)?.content).toContain("tick")
   })
+
+  it("rethrows non-ENOENT errors while reading workspace files", async () => {
+    const dir = await createTempDir("context-broken")
+    tempDirs.push(dir)
+
+    await mkdir(path.join(dir, "AGENTS.md"), { recursive: true })
+
+    await expect(buildBaseContext(dir)).rejects.toMatchObject({
+      code: "EISDIR"
+    })
+  })
 })

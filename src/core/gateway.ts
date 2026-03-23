@@ -110,7 +110,6 @@ export class Gateway {
       await this.logger.info(
         `Outbound chatId=${message.chatId} model=${aiResponse.model} attempt=${aiResponse.attempt} latencyMs=${aiResponse.latencyMs} text=${JSON.stringify(finalText)}`
       );
-      await this.whatsapp.sendText(message.chatId, finalText);
 
       const assistantMessage: ChatMessage = {
         role: "assistant",
@@ -119,6 +118,8 @@ export class Gateway {
       };
       await this.sessions.appendMessage(sessionPath, assistantMessage);
       await this.sqlite.saveMessage(message.chatId, assistantMessage, sessionPath);
+
+      await this.whatsapp.sendText(message.chatId, finalText);
     } catch (error) {
       const errorDetails =
         error instanceof Error
@@ -135,6 +136,13 @@ export class Gateway {
   }
 
   private async handleCommand(chatId: string, command: string): Promise<void> {
+    const isEnabled = this.config.commands.enabled.includes(command)
+    if (!isEnabled) {
+      if (this.config.commands.unknownCommandBehavior === "ignore") {
+        return
+      }
+    }
+
     if (command === "/ping") {
       const latency = Date.now() - this.bootAt;
       await this.whatsapp.sendText(chatId, handlePing(latency, new Date().toISOString()));
@@ -174,6 +182,9 @@ export class Gateway {
     }
 
     // Unknown commands are intentionally ignored for MVP.
+    if (this.config.commands.unknownCommandBehavior === "ignore") {
+      return
+    }
   }
 
   private sessionIdFromPath(filePath: string): string {
@@ -202,7 +213,7 @@ export class Gateway {
   }
 
   private async createSessionPath(chatId: string): Promise<string> {
-    const sessionPath = this.sessions.buildSessionPath(new Date());
+    const sessionPath = this.sessions.buildSessionPath(chatId, new Date());
     this.sessionPathByChatId.set(chatId, sessionPath);
     await this.sqlite.setActiveSessionPath(chatId, sessionPath);
     return sessionPath;
@@ -252,7 +263,7 @@ export class Gateway {
   }
 
   private formatAssistantReply(text: string): string {
-    const normalized = text.replace(/\r\n/g, "\n").trim();
+    const normalized = text.replaceAll("\r\n", "\n").trim();
     return normalized || "empty response";
   }
 }

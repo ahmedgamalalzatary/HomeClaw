@@ -73,4 +73,23 @@ describe("ConfigLoader", () => {
     const loader = new ConfigLoader("config.json")
     expect(() => loader.getCurrent()).toThrow(/Config has not been loaded yet/)
   })
+
+  it("throws when config file shape is invalid", async () => {
+    const dir = await createTempDir("config-loader-invalid")
+    try {
+      const configPath = path.join(dir, "config.json")
+      await writeFile(configPath, JSON.stringify({
+        ...sampleConfig,
+        provider: {
+          ...sampleConfig.provider,
+          fallbackModels: "not-an-array"
+        }
+      }), "utf8")
+
+      const loader = new ConfigLoader(configPath)
+      await expect(loader.load()).rejects.toThrow(/Invalid config/)
+    } finally {
+      await removeTempDir(dir)
+    }
+  })
 })

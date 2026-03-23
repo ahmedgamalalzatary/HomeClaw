@@ -1,187 +1,161 @@
 # Claw Gateway Phases
 
-This file is the phase plan only.  
-Implementation status is tracked in `docs/Checklist.md`.
+This phase map is aligned to the current codebase on 2026-03-23.
+Use `docs/Checklist.md` for line-by-line status.
 
 ## Phase 1: Foundation
 
-- Initialize Node 22 + TypeScript project.
-- Add dev/prod scripts (`dev`, `build`, `start`, `typecheck`).
-- Create runtime folders:
-- `data/whatsapp`
-- `logs`
-- `sessions`
-- `sessions/heartbeat`
-- `memory`
-- `db`
-- `workspace`
-- Add Dockerfile + docker-compose for single-container worker deployment.
-- Keep UTC runtime.
+Status: complete
+
+- Node 22 + TypeScript project is in place.
+- Dockerfile and docker-compose exist.
+- Config, workspace, logging, and storage paths are defined.
 
 ## Phase 2: Base Runtime Contract
 
-- Gateway runs as a worker process (no HTTP admin server in MVP).
-- Run 24/7 on VPS in Docker.
-- Keep no OpenAI-compatible API surface for MVP.
-- Keep no rate limit for single-user MVP.
-- Keep no allowlist enforcement for MVP (future feature).
+Status: complete
+
+- The app runs as a worker process.
+- There is no HTTP admin surface.
+- Single-user, no-rate-limit, no-allowlist behavior is still the current contract.
 
 ## Phase 3: WhatsApp Transport (Baileys)
 
-- Use Baileys as WhatsApp transport.
-- Use multi-file auth state at `data/whatsapp`.
-- Enable QR terminal auth flow.
-- Keep DM-only scope.
-- Keep text-only scope.
-- Reply to each normal incoming DM text message.
-- Reconnect with exponential backoff when disconnected (e.g., 1s, 2s, 4s, 8s, max 60s).
+Status: complete
+
+- Baileys QR auth and multi-file auth state are implemented.
+- Inbound handling is DM-only and text-only.
+- Mark-as-read, presence updates, deduplication, and reconnect logic are implemented.
 
 ## Phase 4: Google Provider Wiring
 
-- Use Google model provider only for MVP.
-- Read API key from `config.json` (not env for MVP).
-- Read primary model from `config.json`.
-- Read fallback model list from `config.json`.
-- Read generation params from `config.json`:
-- `temperature`
-- `topP`
-- `maxOutputTokens`
-- Keep timeout behavior as no explicit AI timeout fail.
+Status: complete
+
+- Google is the only live AI provider.
+- Model selection and generation params come from `config.json`.
+- Fallback models are supported.
 
 ## Phase 5: Core MVP Message Loop
 
-- Receive message from WhatsApp.
-- Send to AI model.
-- Receive model response.
-- Apply minimal response formatting.
-- Send response back to WhatsApp.
-- Send explicit error text to WhatsApp when AI call fails after retries.
-- Keep process alive after per-message AI failure.
+Status: complete
+
+- Inbound user messages are persisted before the AI call.
+- Base workspace context is loaded for normal AI calls.
+- Assistant replies are normalized, persisted, and sent back to WhatsApp.
 
 ## Phase 6: Command Routing
 
-- Treat message as slash command only if first char is `/`.
-- Any text containing ` /cmd` later in message is normal text.
-- Ignore unknown slash commands.
-- Implement:
-- `/status` (minimal output)
-- `/ping` (gateway-side response with timestamp, no AI call)
-- `/new` (new session)
+Status: complete with minor behavior gap
+
+- `/status`, `/ping`, and `/new` are implemented.
+- Slash parsing behavior matches the current MVP rules.
+- Remaining gap: `/ping` is boot-time delta, not true request latency.
 
 ## Phase 7: Session and Memory Files
 
-- Use session files as markdown (`.md`).
-- Session path format (UTC): `sessions/YYYY-MM-DD/HH-mm-ss.md`.
-- Keep one active session file.
-- On session end, move session file to `memory/<uuid>.md`.
-- Session end triggers:
-- `/new`
-- compaction event
-- No TTL/expiry memory deletion.
+Status: partially complete
+
+- Markdown session files and memory rotation on `/new` are implemented.
+- Memory files use UTC compact timestamp ids.
+- Per-chat session-path isolation is implemented with sanitized chat-id path segments.
 
 ## Phase 8: Persistence and Source-of-Truth Rules
 
-- Persist inbound user message before AI call.
-- Write order for inbound flow:
-- session `.md` first
-- SQLite second
-- Persist assistant message in session and SQLite.
-- Source preference:
-- recent/current context from session `.md`
-- fast search/history from SQLite
-- One SQLite row per message with role (`user`/`assistant`/`system`).
-- Restore state on restart from DB + session files.
+Status: partially complete
+
+- SQLite is live and stores message rows plus active session paths.
+- The gateway reads prior conversation history from markdown session files.
+- Search/history queries, fuller restore behavior, and a stronger source-of-truth contract are still missing.
 
 ## Phase 9: Retry and Fallback Policy
 
-- Retry scope is AI calls only.
-- Default retry plan configurable in `config.json`:
-- attempts: 3
-- delays: 5s, 10s, 10s
-- fallback order:
-- attempt 1: same model retry
-- attempt 2: fallback model 1
-- attempt 3: fallback model 2
+Status: partially complete
+
+- AI-only retry exists with internal defaults.
+- Current runtime order is `primary -> fallback1 -> fallback2`.
+- Config-driven retry tuning and same-model retry-first behavior are not built.
 
 ## Phase 10: Logging Contract
 
-- Log to files + console.
-- Keep logs out of WhatsApp chat output.
-- Use per-session log file split.
-- Keep all operational logs (gateway/provider/transport/retries/errors).
-- Redact API keys in logs.
-- Rotate/split logs by session boundaries.
+Status: mostly complete
+
+- File and console logging work.
+- Session-scoped log files work.
+- Secret redaction and broader logging coverage are still missing.
 
 ## Phase 11: Config and Hot Reload
 
-- Use `config.json` as runtime config.
-- Keep precedence contract for MVP as defaults/file-first (no env override path).
-- Support hot reload scope: `config.json` only.
-- Apply config updates at runtime without full process restart.
+Status: partially complete
+
+- `config.json` is validated and watched for changes.
+- The gateway replaces its in-memory config at runtime.
+- Existing clients and stores are not rebuilt when config changes.
 
 ## Phase 12: Prompt Context Assembly
 
-- Core context files live in `/workspace`:
-- `AGENTS.md`
-- `SOUL.md`
-- `TOOLS.md`
-- `USER.md`
-- `HEARTBEAT.md`
-- Base prompt order:
-- `AGENTS.md`
-- `SOUL.md`
-- `TOOLS.md`
-- `USER.md`
-- `HEARTBEAT.md` or current user message
-- chat context
-- System prompt source is `AGENTS.md`.
+Status: partially complete
+
+- Normal message context loading from workspace files is implemented.
+- `HEARTBEAT.md` support exists only in a helper.
+- Heartbeat context is not used by the runtime yet.
 
 ## Phase 13: Heartbeat Loop
 
-- Scheduler interval default: 30 minutes, configurable.
-- Heartbeat runs as a separate no-history chat.
-- Heartbeat context includes:
-- `HEARTBEAT.md`
-- `TOOLS.md`
-- `AGENTS.md`
-- `SOUL.md`
-- `USER.md`
-- If response equals `heartbeat ok`, send nothing to WhatsApp.
-- Otherwise send output to WhatsApp.
-- Persist heartbeat output under:
-- `sessions/heartbeat/YYYY-MM-DD/HH-mm.md`
+Status: scaffold only
+
+- The scheduler runs on a configured interval.
+- The current task is only `Heartbeat tick.` logging.
+- AI heartbeat generation, WhatsApp delivery, and heartbeat markdown persistence are not wired.
 
 ## Phase 14: Compaction and Long Context Control
 
-- Track token count for full chat.
-- Trigger compaction at 60k tokens.
-- Compress all older history.
-- Keep only 2 latest raw turns:
-- last user message
-- last assistant message
-- Persist compaction result to SQLite.
-- Persist compaction result as markdown history message.
+Status: not started
+
+- No token counting.
+- No compaction trigger.
+- No summary persistence.
 
 ## Phase 15: Vector Memory
 
-- Use `sqlite-vec`.
-- Index source is chat messages.
-- Keep vector retrieval disabled by default.
-- Enable retrieval only when explicitly triggered by bot/model action.
+Status: scaffold only
+
+- `sqlite-vec` dependency and config are present.
+- No real embeddings, index, or retrieval path exists.
 
 ## Phase 16: Workspace Boundary for Tooling
 
-- Restrict tool/file/exec actions to `/workspace` only.
-- Reject paths outside `/workspace`.
-- Keep this enforcement active from first tool execution release.
-- Keep skills/tools behavior aligned with:
-- skills as markdown guidance files
-- model decides action flow based on provided skill/tool docs
+Status: helper only
 
-## Phase 17: Post-MVP Extensions
+- Path guard helper exists.
+- There is no gateway tool runtime yet, so workspace enforcement is not active.
 
-- OAuth auth path (future).
-- Allowlist controls (future).
-- Additional providers/models (future).
-- Group chat support (future).
-- Media input support (future).
+## Phase 17: Checkpointing
+
+Status: not started
+
+- No scheduler.
+- No immutable checkpoint artifacts.
+
+## Phase 18: Web Access Integration
+
+Status: not started
+
+- No `scrapling`.
+- No web-fetch MCP integration.
+
+## Phase 19: Post-MVP Extensions
+
+Status: future
+
+- OAuth, allowlists, group support, media support, and extra providers are still future work.
+
+## Phase 20: Testing and Delivery Quality
+
+Status: mostly complete
+
+- Vitest unit/integration/contract/live structure is in place.
+- CI, deploy, and live smoke workflows are present.
+- `npm run typecheck` passes.
+- `npm test` passes.
+- Current gap:
+- coverage threshold is `70/70`, not `80/80`

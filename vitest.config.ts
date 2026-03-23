@@ -15,9 +15,7 @@ export default defineConfig({
         "src/config/types.ts",
         "src/types/**/*.ts",
         "src/integrations/ai/client.ts",
-        "src/integrations/ai/google-client.ts",
-        "src/integrations/whatsapp/client.ts",
-        "src/integrations/whatsapp/baileys-client.ts"
+        "src/integrations/whatsapp/client.ts"
       ],
       thresholds: {
         lines: 70,
