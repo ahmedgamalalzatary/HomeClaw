@@ -93,6 +93,8 @@ class FailingMoveSessionStore extends TrackingSessionStore {
 }
 
 class TrackingSqliteStore extends SqliteStore {
+  private readonly activeSessionByChatId = new Map<string, string>()
+
   constructor(dbPath: string, private readonly events: string[]) {
     super(dbPath)
   }
@@ -114,6 +116,14 @@ class TrackingSqliteStore extends SqliteStore {
 
   override async status(): Promise<string> {
     return "ready"
+  }
+
+  override async getActiveSessionPath(chatId: string): Promise<string | null> {
+    return this.activeSessionByChatId.get(chatId) ?? null
+  }
+
+  override async setActiveSessionPath(chatId: string, sessionPath: string): Promise<void> {
+    this.activeSessionByChatId.set(chatId, sessionPath)
   }
 }
 
@@ -479,5 +489,221 @@ describe("Gateway integration", () => {
         createdAt: expect.any(String)
       }
     ])
+  })
+
+  it("ignores empty inbound messages", async () => {
+    const events: string[] = []
+    const ai = new FakeAI([{ text: "unused", model: "model-a" }], events)
+    const whatsapp = new FakeWhatsApp()
+    const sessions = new TrackingSessionStore(sessionsDir, memoryDir, events)
+    const sqlite = new TrackingSqliteStore(dbPath, events)
+    const gateway = createGateway(buildConfig(), ai, whatsapp, sessions, sqlite)
+
+    await gateway.start()
+    await whatsapp.emit("   ")
+
+    expect(ai.calls).toHaveLength(0)
+    expect(whatsapp.sent).toHaveLength(0)
+  })
+
+  it("loads persisted session path for command status and normal messages", async () => {
+    const events: string[] = []
+    const ai = new FakeAI([{ text: "restored", model: "model-a" }], events)
+    const whatsapp = new FakeWhatsApp()
+    const sessions = new TrackingSessionStore(sessionsDir, memoryDir, events)
+    const sqlite = new TrackingSqliteStore(dbPath, events)
+    const restoredPath = sessions.buildSessionPath(
+      "restored@s.whatsapp.net",
+      new Date("2026-01-02T03:04:05.000Z")
+    )
+    await sqlite.setActiveSessionPath("restored@s.whatsapp.net", restoredPath)
+    const gateway = createGateway(buildConfig(), ai, whatsapp, sessions, sqlite)
+
+    await gateway.start()
+    await whatsapp.emit("/status", "restored@s.whatsapp.net")
+    await whatsapp.emit("hello again", "restored@s.whatsapp.net")
+
+    expect(whatsapp.sent[0]?.text).toContain(`session: ${restoredPath}`)
+    expect(ai.inputs[0]?.at(-1)).toEqual({
+      role: "user",
+      content: "hello again",
+      createdAt: expect.any(String)
+    })
+  })
+
+  it("normalizes blank AI replies to the empty response fallback", async () => {
+    const events: string[] = []
+    const ai = new FakeAI([{ text: "   \r\n  ", model: "model-a" }], events)
+    const whatsapp = new FakeWhatsApp()
+    const sessions = new TrackingSessionStore(sessionsDir, memoryDir, events)
+    const sqlite = new TrackingSqliteStore(dbPath, events)
+    const gateway = createGateway(buildConfig(), ai, whatsapp, sessions, sqlite)
+
+    await gateway.start()
+    await whatsapp.emit("blank please")
+
+    expect(whatsapp.sent[0]?.text).toBe("empty response")
+  })
+
+  it("uses a generic provider message when asked to format a non-Error directly", () => {
+    const gateway = createGateway(
+      buildConfig(),
+      new FakeAI([], []),
+      new FakeWhatsApp(),
+      new TrackingSessionStore(sessionsDir, memoryDir, []),
+      new TrackingSqliteStore(dbPath, [])
+    ) as unknown as {
+      extractProviderErrorMessage(error: unknown): string
+      formatAssistantReply(text: string): string
+    }
+
+    expect(gateway.extractProviderErrorMessage({ code: "x" })).toBe("An error occurred.")
+    expect(gateway.formatAssistantReply(" \r\n ")).toBe("empty response")
+  })
+
+  it("updates config for subsequent commands", async () => {
+    const events: string[] = []
+    const ai = new FakeAI([], events)
+    const whatsapp = new FakeWhatsApp()
+    const sessions = new TrackingSessionStore(sessionsDir, memoryDir, events)
+    const sqlite = new TrackingSqliteStore(dbPath, events)
+    const gateway = createGateway(buildConfig(), ai, whatsapp, sessions, sqlite)
+    const nextConfig = buildConfig()
+    nextConfig.commands.enabled = ["/status", "/new"]
+
+    await gateway.start()
+    await gateway.updateConfig(nextConfig)
+    await whatsapp.emit("/ping")
+
+    expect(whatsapp.sent).toHaveLength(0)
+  })
+
+  it("returns internal error when command handling throws an Error without a stack", async () => {
+    const events: string[] = []
+    const ai = new FakeAI([], events)
+    const whatsapp = new FakeWhatsApp()
+    const sessions = new TrackingSessionStore(sessionsDir, memoryDir, events)
+    const sqlite = new TrackingSqliteStore(dbPath, events)
+    const gateway = createGateway(buildConfig(), ai, whatsapp, sessions, sqlite) as Gateway & {
+      handleCommand(chatId: string, command: string): Promise<void>
+    }
+    const error = new Error("command broke")
+    Object.defineProperty(error, "stack", {
+      value: undefined,
+      configurable: true
+    })
+
+    await gateway.start()
+    gateway.handleCommand = async () => {
+      throw error
+    }
+    await whatsapp.emit("/ping")
+
+    expect(whatsapp.sent.at(-1)?.text).toContain("internal error")
+  })
+
+  it("returns internal error when command handling throws a string", async () => {
+    const events: string[] = []
+    const ai = new FakeAI([], events)
+    const whatsapp = new FakeWhatsApp()
+    const sessions = new TrackingSessionStore(sessionsDir, memoryDir, events)
+    const sqlite = new TrackingSqliteStore(dbPath, events)
+    const gateway = createGateway(buildConfig(), ai, whatsapp, sessions, sqlite) as Gateway & {
+      handleCommand(chatId: string, command: string): Promise<void>
+    }
+
+    await gateway.start()
+    gateway.handleCommand = async () => {
+      throw "command string failure"
+    }
+    await whatsapp.emit("/ping")
+
+    expect(whatsapp.sent.at(-1)?.text).toContain("internal error")
+  })
+
+  it("returns provider message when reply generation throws an Error without a stack", async () => {
+    const events: string[] = []
+    const ai = new FakeAI([], events)
+    const whatsapp = new FakeWhatsApp()
+    const sessions = new TrackingSessionStore(sessionsDir, memoryDir, events)
+    const sqlite = new TrackingSqliteStore(dbPath, events)
+    const gateway = createGateway(buildConfig(), ai, whatsapp, sessions, sqlite) as Gateway & {
+      generateAssistantReply(input: ChatMessage[]): Promise<AIResponse>
+    }
+    const error = new Error("provider message only")
+    Object.defineProperty(error, "stack", {
+      value: undefined,
+      configurable: true
+    })
+
+    await gateway.start()
+    gateway.generateAssistantReply = async () => {
+      throw error
+    }
+    await whatsapp.emit("hello")
+
+    expect(whatsapp.sent[0]?.text).toBe("provider message only")
+  })
+
+  it("returns generic provider message when reply generation throws a plain object", async () => {
+    const events: string[] = []
+    const ai = new FakeAI([], events)
+    const whatsapp = new FakeWhatsApp()
+    const sessions = new TrackingSessionStore(sessionsDir, memoryDir, events)
+    const sqlite = new TrackingSqliteStore(dbPath, events)
+    const gateway = createGateway(buildConfig(), ai, whatsapp, sessions, sqlite) as Gateway & {
+      generateAssistantReply(input: ChatMessage[]): Promise<AIResponse>
+    }
+
+    await gateway.start()
+    gateway.generateAssistantReply = async () => {
+      throw { reason: "plain-object" }
+    }
+    await whatsapp.emit("hello")
+
+    expect(whatsapp.sent[0]?.text).toBe("An error occurred.")
+  })
+
+  it("returns internal error when session setup throws an Error without a stack", async () => {
+    const events: string[] = []
+    const ai = new FakeAI([], events)
+    const whatsapp = new FakeWhatsApp()
+    const sessions = new TrackingSessionStore(sessionsDir, memoryDir, events)
+    const sqlite = new TrackingSqliteStore(dbPath, events)
+    const gateway = createGateway(buildConfig(), ai, whatsapp, sessions, sqlite) as Gateway & {
+      getOrCreateSessionPath(chatId: string): Promise<string>
+    }
+    const error = new Error("session setup failed")
+    Object.defineProperty(error, "stack", {
+      value: undefined,
+      configurable: true
+    })
+
+    await gateway.start()
+    gateway.getOrCreateSessionPath = async () => {
+      throw error
+    }
+    await whatsapp.emit("hello")
+
+    expect(whatsapp.sent[0]?.text).toContain("internal error")
+  })
+
+  it("returns internal error when session setup throws a plain object", async () => {
+    const events: string[] = []
+    const ai = new FakeAI([], events)
+    const whatsapp = new FakeWhatsApp()
+    const sessions = new TrackingSessionStore(sessionsDir, memoryDir, events)
+    const sqlite = new TrackingSqliteStore(dbPath, events)
+    const gateway = createGateway(buildConfig(), ai, whatsapp, sessions, sqlite) as Gateway & {
+      getOrCreateSessionPath(chatId: string): Promise<string>
+    }
+
+    await gateway.start()
+    gateway.getOrCreateSessionPath = async () => {
+      throw { reason: "session object failure" }
+    }
+    await whatsapp.emit("hello")
+
+    expect(whatsapp.sent[0]?.text).toContain("internal error")
   })
 })

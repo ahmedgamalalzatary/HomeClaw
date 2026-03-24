@@ -80,4 +80,17 @@ describe("SqliteStore", () => {
 
     await fileStore.close()
   })
+
+  it("stores and reads active session paths", async () => {
+    await store.setActiveSessionPath("chat-1", "sessions/chat-1/2026-01-02/03-04-05.md")
+
+    await expect(store.getActiveSessionPath("chat-1")).resolves.toBe(
+      "sessions/chat-1/2026-01-02/03-04-05.md"
+    )
+    await expect(store.getActiveSessionPath("missing-chat")).resolves.toBeNull()
+  })
+
+  it("reports zero counts for a freshly connected database", async () => {
+    await expect(store.status()).resolves.toBe("ready messages=0 sessions=0")
+  })
 })

@@ -71,4 +71,38 @@ describe("GoogleAIClient", () => {
       })
     ).rejects.toThrow(/empty response/i)
   })
+
+  it("rejects with empty response when provider omits text", async () => {
+    generateContentMock.mockResolvedValueOnce({
+      modelVersion: "gemini-version"
+    })
+
+    const client = new GoogleAIClient("k")
+
+    await expect(
+      client.complete([], "gemini-model", {
+        temperature: 0,
+        topP: 1,
+        maxOutputTokens: 16
+      })
+    ).rejects.toThrow(/empty response/i)
+  })
+
+  it("falls back to requested model when provider omits model version", async () => {
+    generateContentMock.mockResolvedValueOnce({
+      text: "ok"
+    })
+
+    const client = new GoogleAIClient("k")
+    const response = await client.complete([], "gemini-model", {
+      temperature: 0,
+      topP: 1,
+      maxOutputTokens: 16
+    })
+
+    expect(response).toEqual({
+      text: "ok",
+      model: "gemini-model"
+    })
+  })
 })

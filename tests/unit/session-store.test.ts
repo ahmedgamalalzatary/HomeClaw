@@ -1,12 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { SessionStore } from "../../src/storage/session-store.js"
 import { createTempDir, removeTempDir } from "../helpers/temp-dir.js"
 
 const tempDirs: string[] = []
 
 afterEach(async () => {
+  vi.useRealTimers()
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()
     if (dir) {
@@ -167,5 +168,42 @@ describe("SessionStore", () => {
         createdAt: "2026-01-02T03:04:05.000Z"
       }
     ])
+  })
+
+  it("rethrows non-missing-file read errors", async () => {
+    const dir = await createTempDir("session-read-dir")
+    tempDirs.push(dir)
+
+    const store = new SessionStore(path.join(dir, "sessions"), path.join(dir, "memory"))
+    const sessionPath = path.join(dir, "is-a-directory")
+    await mkdir(sessionPath, { recursive: true })
+
+    await expect(store.getMessages(sessionPath)).rejects.toMatchObject({
+      code: "EISDIR"
+    })
+  })
+
+  it("fails when it cannot allocate a unique memory file id after repeated collisions", async () => {
+    const dir = await createTempDir("session-memory-collision")
+    tempDirs.push(dir)
+
+    const sessionsDir = path.join(dir, "sessions")
+    const memoryDir = path.join(dir, "memory")
+    const store = new SessionStore(sessionsDir, memoryDir)
+    const sessionPath = store.buildSessionPath(
+      "user@s.whatsapp.net",
+      new Date("2026-01-02T03:04:05.000Z")
+    )
+
+    await mkdir(path.dirname(sessionPath), { recursive: true })
+    await writeFile(sessionPath, "content", "utf8")
+    await mkdir(memoryDir, { recursive: true })
+
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-01-02T03:04:05.000Z"))
+    const collisionPath = path.join(memoryDir, "20260102030405.md")
+    await writeFile(collisionPath, "taken", "utf8")
+
+    await expect(store.moveSessionToMemory(sessionPath)).rejects.toThrow(/unique memory file id/)
   })
 })

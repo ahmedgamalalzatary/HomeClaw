@@ -236,14 +236,19 @@ export class BaileysClient implements WhatsAppClient {
     }
     this.reconnectInFlight = true
     this.reconnectAttempt += 1
+    let failed = false
     try {
       await this.connect()
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error)
       await this.logger?.error(`Reconnection failed: ${messageText}`)
-      this.scheduleReconnect()
+      failed = true
     } finally {
       this.reconnectInFlight = false
+    }
+
+    if (failed) {
+      this.scheduleReconnect()
     }
   }
 

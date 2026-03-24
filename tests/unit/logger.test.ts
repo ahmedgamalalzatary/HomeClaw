@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { Logger } from "../../src/core/logger.js"
 import { createTempDir, removeTempDir } from "../helpers/temp-dir.js"
 
@@ -20,6 +20,23 @@ describe("Logger", () => {
       expect(content).toContain("[ERROR] error")
     } finally {
       await removeTempDir(dir)
+    }
+  })
+
+  it("writes to stdout when console logging is enabled", async () => {
+    const dir = await createTempDir("logger-console")
+    try {
+      const stdoutSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true)
+      const logger = new Logger(dir, true)
+
+      await logger.setSession("console")
+      await logger.info("hello console")
+
+      expect(stdoutSpy).toHaveBeenCalled()
+      expect(String(stdoutSpy.mock.calls[0]?.[0])).toContain("[INFO] hello console")
+    } finally {
+      await removeTempDir(dir)
+      vi.restoreAllMocks()
     }
   })
 })

@@ -18,8 +18,8 @@ export default defineConfig({
         "src/integrations/whatsapp/client.ts"
       ],
       thresholds: {
-        lines: 70,
-        branches: 70
+        lines: 80,
+        branches: 80
       }
     }
   }

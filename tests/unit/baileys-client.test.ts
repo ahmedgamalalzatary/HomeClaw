@@ -17,7 +17,8 @@ const {
   sockets,
   handlersBySocket,
   useMultiFileAuthStateMock,
-  makeWASocketMock
+  makeWASocketMock,
+  qrcodeGenerateMock
 } = vi.hoisted(() => {
   const sockets: FakeSocket[] = []
   const handlersBySocket = new Map<FakeSocket, Map<string, EventHandler[]>>()
@@ -48,7 +49,8 @@ const {
     sockets,
     handlersBySocket,
     useMultiFileAuthStateMock,
-    makeWASocketMock
+    makeWASocketMock,
+    qrcodeGenerateMock: vi.fn()
   }
 })
 
@@ -59,7 +61,7 @@ vi.mock("@whiskeysockets/baileys", () => ({
 
 vi.mock("qrcode-terminal", () => ({
   default: {
-    generate: vi.fn()
+    generate: qrcodeGenerateMock
   }
 }))
 
@@ -85,7 +87,7 @@ describe("BaileysClient", () => {
   async function startClient(): Promise<{ client: BaileysClient; socket: FakeSocket }> {
     useMultiFileAuthStateMock.mockResolvedValue({ state: {}, saveCreds: vi.fn() })
     const client = new BaileysClient("auth")
-    await client.start(async () => {})
+    await client.start(async () => { })
     const socket = sockets[0]
     if (!socket) {
       throw new Error("expected socket")
@@ -103,7 +105,7 @@ describe("BaileysClient", () => {
       .mockResolvedValueOnce({ state: {}, saveCreds: vi.fn() })
 
     const client = new BaileysClient("auth")
-    await client.start(async () => {})
+    await client.start(async () => { })
     expect(useMultiFileAuthStateMock).toHaveBeenCalledTimes(1)
 
     const firstSocket = sockets[0]
@@ -231,5 +233,100 @@ describe("BaileysClient", () => {
     })
 
     expect(onMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it("renders QR codes and logs connected status transitions", async () => {
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn()
+    }
+    useMultiFileAuthStateMock.mockResolvedValue({ state: {}, saveCreds: vi.fn() })
+    const client = new BaileysClient("auth", logger as never)
+    await client.start(async () => { })
+    const socket = sockets[0]
+    if (!socket) {
+      throw new Error("expected socket")
+    }
+
+    await emitSocketEvent(socket, "connection.update", { qr: "qr-data" })
+    await emitSocketEvent(socket, "connection.update", { connection: "open" })
+
+    expect(qrcodeGenerateMock).toHaveBeenCalledWith("qr-data", { small: true })
+    expect(logger.info).toHaveBeenCalledWith("Scan the QR code shown above to pair WhatsApp.")
+    expect(client.status()).toBe("connected")
+  })
+
+  it("tolerates missing upsert messages arrays and direct private handler fallbacks", async () => {
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn()
+    }
+    useMultiFileAuthStateMock.mockResolvedValue({ state: {}, saveCreds: vi.fn() })
+    const client = new BaileysClient("auth", logger as never)
+    await client.start(async () => { })
+    const socket = sockets[0]
+    if (!socket) {
+      throw new Error("expected socket")
+    }
+
+    await emitSocketEvent(socket, "messages.upsert", { type: "notify" })
+
+    const internal = client as unknown as {
+      handleIncomingMessage(message: unknown): Promise<void>
+      isDuplicateMessageId(messageId: string): boolean
+      safeMarkAsRead(message: unknown): Promise<void>
+      safeSendPresenceUpdate(presence: "paused" | "composing", chatId: string): Promise<void>
+      scheduleReconnect(): void
+      runReconnectAttempt(): Promise<void>
+      resetReconnectState(): void
+      seenMessageIds: Set<string>
+      maxSeenMessageIds: number
+      reconnectTimer: NodeJS.Timeout | null
+      reconnectInFlight: boolean
+      socket: FakeSocket | null
+      onMessage: ((message: unknown) => Promise<void>) | null
+    }
+
+    internal.onMessage = null
+    await internal.handleIncomingMessage({
+      key: { remoteJid: "u@s.whatsapp.net", fromMe: false },
+      message: { conversation: "ignored" }
+    })
+
+    await internal.handleIncomingMessage({
+      key: { id: "no-text", remoteJid: "u@s.whatsapp.net", fromMe: false },
+      message: {}
+    })
+
+    internal.socket = null
+    await internal.safeMarkAsRead({})
+    await internal.safeSendPresenceUpdate("paused", "chat@s.whatsapp.net")
+
+    internal.socket = socket
+    socket.readMessages.mockRejectedValueOnce("read fail")
+    socket.sendPresenceUpdate.mockRejectedValueOnce("presence fail")
+    await internal.safeMarkAsRead({ key: { remoteJid: "u@s.whatsapp.net" } })
+    await internal.safeSendPresenceUpdate("paused", "chat@s.whatsapp.net")
+
+    internal.seenMessageIds.clear()
+    for (let index = 0; index <= internal.maxSeenMessageIds; index += 1) {
+      internal.seenMessageIds.add(`id-${index}`)
+    }
+    expect(internal["isDuplicateMessageId"]("fresh-id")).toBe(false)
+
+    internal.reconnectTimer = setTimeout(() => { }, 1)
+    internal.scheduleReconnect()
+    clearTimeout(internal.reconnectTimer)
+    internal.reconnectTimer = null
+    internal.reconnectInFlight = true
+    await internal.runReconnectAttempt()
+    internal.reconnectInFlight = false
+    internal.reconnectTimer = setTimeout(() => { }, 1)
+    internal.resetReconnectState()
+
+    expect(logger.info).toHaveBeenCalled()
+    expect(logger.warn).toHaveBeenCalled()
   })
 })

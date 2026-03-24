@@ -64,4 +64,25 @@ describe("buildRetryPlan", () => {
       { model: "model-a", delayMs: DEFAULT_DELAYS_MS[2] }
     ])
   })
+
+  it("falls back to zero delay when overrides provide an empty list", () => {
+    const plan = buildRetryPlan(buildProvider(), {
+      maxAttempts: 2,
+      delaysMs: []
+    })
+
+    expect(plan).toEqual([
+      { model: "model-a", delayMs: 0 },
+      { model: "model-b", delayMs: 0 }
+    ])
+  })
+
+  it("clamps undefined delay values to zero", () => {
+    const plan = buildRetryPlan(buildProvider(), {
+      maxAttempts: 1,
+      delaysMs: [undefined as unknown as number]
+    })
+
+    expect(plan).toEqual([{ model: "model-a", delayMs: 0 }])
+  })
 })
